@@ -1,0 +1,2717 @@
+---
+title: "Widely-used fungicide Pristine® causes sub-lethal effects in common eastern bumble bee (*Bombus impatiens*) microcolonies "
+author: "Emily Runnion"
+date: "Data Collected 2022, Data Analyzed 2023"
+output:
+  html_document:
+    toc: true
+    toc_depth:  2
+    number_sections: false
+    toc_float: true
+    theme: journal
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+```
+
+```{r load libraries, include=FALSE}
+library(readr)
+library(viridisLite)
+library(stats)
+library(ggplot2)
+library(car)
+library(emmeans)
+library(MASS)
+library(lme4)
+library(tidyverse)
+library(dplyr)
+
+library(kableExtra)
+library(blmeco)
+library(tidyverse)
+library(dplyr)
+library(cowplot)
+library(plotly)
+library(agricolae) 
+library(ggpubr)
+library(glue)
+library(multcomp)
+library(multcompView)
+library(glmmTMB)
+library(rstatix)
+library(fitdistrplus)
+library(logspline)
+library(olsrr)
+library(GGally)
+library(data.table)
+```
+
+#Input Data 
+
+```{r input relevant data files}
+
+brood <- read_csv("brood.csv")
+brood$colony <- as.factor(brood$colony)
+brood$treatment <- as.factor(brood$treatment)
+brood$replicate<- as.factor(brood$replicate)
+brood$qro <- as.factor(brood$qro)
+
+drone.ce <- read_csv("drone.count.emerge.csv")
+drone.ce$colony <- as.factor(drone.ce$colony)
+drone.ce$treatment <- as.factor(drone.ce$treatment)
+drone.ce$replicate<- as.factor(drone.ce$replicate)
+drone.ce$qro <- as.factor(drone.ce$qro)
+
+drone.h <- read_csv("drone.health.csv")
+drone.h$colony <- as.factor(drone.h$colony)
+drone.h$treatment <- as.factor(drone.h$treatment)
+drone.h$replicate<- as.factor(drone.h$replicate)
+drone.h$qro <- as.factor(drone.h$qro)
+
+pollen <- read_csv("pollen.csv")
+pollen$colony <- as.factor(pollen$colony)
+pollen$treatment <- as.factor(pollen$treatment)
+pollen$replicate<- as.factor(pollen$replicate)
+
+qro <- read_csv("qro.csv")
+qro$colony <- as.factor(qro$colony)
+qro$qro <- as.factor(qro$qro)
+pollen <- merge(pollen, qro, by.x = "colony")
+pollen <- na.omit(pollen)
+pollen$qro <- as.factor(pollen$qro)
+# get rid of negative numbers
+pollen$difference[pollen$difference < 0] <- NA
+pollen <- na.omit(pollen)
+range(pollen$difference)
+
+weights <- read_csv("weights.csv")
+weights$colony <- as.factor(weights$colony)
+weights$treatment <- as.factor(weights$treatment)
+weights$replicate<- as.factor(weights$replicate)
+weights$qro <- as.factor(weights$qro)
+
+workers <- read_csv("workers.csv")
+workers$colony <- as.factor(workers$colony)
+workers$treatment <- as.factor(workers$treatment)
+workers$replicate<- as.factor(workers$replicate)
+workers$qro <- as.factor(workers$qro)
+workers$alive_at_end <- as.logical(workers$alive_at_end)
+workers$dead_at_end <- as.logical(workers$dead_at_end)
+
+cbindworkers <- read.csv("cbindworkers.csv")
+cbindworkers$colony <- as.factor(cbindworkers$colony)
+cbindworkers$treatment <- as.factor(cbindworkers$treatment)
+cbindworkers$replicate <- as.factor(cbindworkers$replicate)
+
+```
+
+
+# Weight Change
+
+```{r}
+w <- weights 
+
+range(w$difference)
+
+u <- is.na(w)
+unique(u)
+
+ggplot(w, aes(x = difference, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.5, col = I("black")) +
+  scale_fill_viridis_d() +  # Use viridis_d() for the color-blind friendly palette
+  ggtitle("Colony Weight Change") +
+  labs(y = "Count", x = "Weight (g)")
+
+shapiro.test(w$difference)
+
+```
+
+```{r}
+descdist(w$difference, discrete = FALSE)
+
+wmod.int <- glm(difference ~ treatment*whole.mean + alive + duration + replicate, data = w)
+wmod1 <- glm(difference ~ treatment + whole.mean + alive + duration + replicate, data = w)
+
+anova(wmod.int, wmod1, test = "Chisq")
+
+AIC(wmod.int, wmod1)
+
+drop1(wmod1, test = "Chisq")
+
+wmod2 <- update(wmod1, .~. -duration)
+
+anova(wmod1, wmod2, test = "Chisq")
+
+AIC(wmod1, wmod2)
+
+drop1(wmod2, test = "Chisq")
+
+wmod3 <- update(wmod2, .~. -replicate)
+
+anova(wmod2, wmod3, test = "Chisq")
+
+drop1(wmod3, test = "Chisq")
+
+wmod3 <- update(wmod3, .~. -alive)
+drop1(wmod3, test = "Chisq")
+
+Anova(wmod3)
+
+wmod3
+summary(wmod3)
+
+```
+
+```{r}
+wsum <- w %>%
+  group_by(treatment) %>%
+  summarise(m = mean(difference), 
+            sd = sd(difference), 
+            n = length(difference)) %>%
+  mutate(se = sd/sqrt(n))
+
+wdt <- setDT(as.data.frame(wsum))
+wdt
+
+aw <- setDT(as.data.frame(Anova(wmod3)))
+aw
+
+we <- emmeans(wmod3, "treatment")
+wp <- pairs(we)
+wp <- as.data.frame(wp)
+wp <- setDT(wp)
+wp
+```
+
+
+```{r, fig.width= 15, fig.height= 12}
+wtuk.means <- emmeans(object = wmod3,
+                        specs = "treatment",
+                        adjust = "Tukey",
+                        type = "response")
+
+
+wtuk.means
+
+wtkdt <- setDT(as.data.frame(wtuk.means))
+wtkdt
+
+w.cld.model <- cld(object = wtuk.means,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+w.cld.model
+
+wtuk.treatment <- as.data.frame(w.cld.model)
+wtuk.treatment
+
+w_max <- w %>%
+  group_by(treatment) %>%
+  summarize(maxw = max(mean(difference)))
+
+
+w_for_plotting <- full_join(wtuk.treatment, w_max,
+                              by="treatment")
+
+wsum
+
+ggplot(data = wsum, aes(x = treatment, y = m, fill = treatment)) +
+  geom_col(col = "black") +
+  coord_cartesian(ylim = c(0, 20)) +
+  scale_fill_viridis_d() +  # Use viridis_d() for the color-blind friendly palette
+  geom_errorbar(aes(ymin = m - se, ymax = m + sd),
+                position = position_dodge(2), width = 0.4, size = 1.5) +
+  labs(y = "Mean Weight Difference") +
+  ggtitle("Average Colony Weight Change(g) by Treatment") +
+  scale_x_discrete(
+    name = "Treatment",
+    labels = c("0 PPB", "150 PPB", "1,500 PPB", "15,000 PPB", "150,000 PPB")
+  ) +
+  theme_classic(base_size = 30) +  # Adjust the base_size as needed
+  annotate(
+    geom = "text",
+    x = 1, y = 19,
+    label = " p = 0.24",
+    size = 15  # Adjust the size of the annotation text as needed
+  ) +
+  annotate(
+    geom = "text",
+    x = c(1, 5, 2, 4, 3),
+    y = c(14, 15, 14.5, 16, 18),
+    label = c("a", "a", "a", "a", "a"),
+    size = 20  # Adjust the size of the annotation text as needed
+  ) +
+  theme(legend.position = "none")
+
+ggplot(w, aes(x = whole.mean, y = difference, color = treatment)) +
+  geom_point(size = 5)+
+  ggtitle("Amount of Pollen  Consumed vs. Average Colony Weight Change")+
+  xlab("Mean Polen Consumption(g)") +
+  ylab("Mean Weight(g)") +
+  scale_fill_viridis_d() +
+  theme(text = element_text(size = 20)) +
+  geom_smooth(method = "lm", color = "black")
+
+
+```
+
+# Pollen Consumption
+
+```{r}
+shapiro.test(pollen$difference)
+
+pollen$sq <- (pollen$difference)^(1/3)
+
+pollen$box <- bcPower(pollen$difference, -3, gamma=1)
+
+shapiro.test(pollen$sq)
+shapiro.test(pollen$box)
+
+ggplot(pollen, aes(x = box, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.01, col = I("black")) +
+  scale_fill_viridis_d() +  # Use viridis_d() for the color-blind friendly palette
+  ggtitle("Pollen Consumption(g)") +
+  labs(y = "Count", x = "Pollen (g)")
+
+p1 <- aov(box ~ treatment + count + bees_alive + replicate, data = pollen )
+drop1(p1, test = "Chisq")
+summary(p1)
+plot(p1)
+
+tuk <- glht(p1, linfct = mcp(treatment = "Tukey"))
+
+tukcld <- cld(tuk)
+tukcld
+
+p3 <- lmer(box ~ treatment + count + bees_alive + replicate + (1|colony), data = pollen)
+plot(p3)
+qqnorm(resid(p3));qqline(resid(p3))
+drop1(p3, test = "Chisq")
+Anova(p3)
+plot(pollen$treatment, pollen$difference)
+
+p7 <- lmer(box ~ treatment + (1|colony), data = pollen)
+Anova(p7)
+
+p2 <- lmer(box ~ treatment*count + bees_alive + replicate + (1|colony), data = pollen )
+plot(p2)
+p2
+summary(p2)
+Anova(p2)
+AP <- setDT(as.data.frame(Anova(p2)))
+AP
+qqnorm(resid(p2));qqline(resid(p2)) 
+
+anova(p3, p2, test = "Chisq")
+
+drop1(p2, test = "Chisq")
+
+pe <- emmeans(p2, pairwise ~ treatment, type = "response")
+pe
+
+pecld <- cld(object = pe, 
+               adjust = "TUkey",
+               alpha = 0.05,
+               Letters = letters)
+
+pecld
+
+
+sum <- pollen %>%
+  group_by(treatment) %>%
+  summarise(mean = mean(difference),
+            sd = sd(difference),
+            n = length(difference)) %>%
+  mutate(se = sd/sqrt(n))
+
+sum$plot <- sum$mean + sum$se
+
+sum
+
+sumdt <- setDT(as.data.frame(sum))
+sumdt
+emp <- emmeans(p2, pairwise ~ "treatment")
+empdt <- setDT(as.data.frame(emp$emmeans))
+ecpdt <- setDT(as.data.frame(emp$contrasts))
+empdt
+ecpdt
+
+```
+
+
+```{r, fig.width= 12, fig.height=10}
+
+ggplot(data = sum, aes(x=treatment, y = mean, fill = treatment)) +
+  geom_col(col = "black") +
+  coord_cartesian(ylim = c(0.3, 0.58)) +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Mean Pollen Consumed (g)") +
+  annotate(geom = "text",
+    x = c(1, 2, 3, 4, 5),
+    y = c(sum$plot + 0.05),
+    label = c("a", "a", "a", "a", "a"),
+    size = 8  # Adjust the size of the annotation text as needed
+  ) +
+  theme_classic(base_size = 20) +
+  theme(legend.position = "none") +
+  annotate(geom = "text",
+           x = 1, y = 0.58,
+           label = "P > 0.05",
+           size = 10)
+
+
+```
+
+# Pollen over time 
+
+```{r, fig.width= 10, fig.height=8}
+
+pollen$dose <- paste0(pollen$dose, " ppb Pristine")
+pollen$days <- 2 * pollen$count
+
+pollen.plot <- ggplot(pollen, aes(x = days, y = difference, color = dose)) +
+  geom_point(size =5)+
+  ylab("Mean Polen Consumption(g)") +
+  xlab("Time (days)") +
+  scale_fill_viridis_d() +
+  theme(text = element_text(size = 30)) +
+  geom_smooth(method = "lm", color = "black") +
+  theme_cowplot() +
+  theme(legend.position = "none")
+
+pollen.plot
+
+```
+
+
+```{r}
+library(crosstalk)
+```
+
+
+# Whole Mean
+
+```{r}
+wmint <- glm(whole.mean ~ treatment*brood_cells + alive + replicate + drones, data = brood)
+wm1 <- glm(whole.mean ~ treatment + brood_cells + alive + replicate + drones, data = brood)
+anova(wmint, wm1, test = "Chisq")
+AIC(wmint, wm1)
+summary(wm1)
+drop1(wm1, test = "Chisq")
+wm2 <- update(wm1, .~. -alive)
+drop1(wm2, .~. -replicate, test = "Chisq")
+
+sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mean = mean(whole.mean),
+            sd = sd(whole.mean),
+            n = length(whole.mean)) %>%
+  mutate(se = sd/sqrt(n))
+
+sum$plot <- sum$mean + sum$se
+
+ggplot(data = sum, aes(x=treatment, y = mean, fill = treatment)) +
+  geom_col(col = "black") +
+  coord_cartesian(ylim = c(0.3, 0.6)) +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9))
+
+
+sum <- pollen %>%
+  group_by(colony) %>%
+  summarise(mean = mean(difference),
+            sd = sd(difference),
+            n = length(difference)) %>%
+  mutate(se = sd/sqrt(n))
+```
+
+
+# Workers 
+
+## Dry Weight
+
+```{r}
+
+ggplot(workers, aes(x = dry_weight, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.002, col = I("black")) +
+  scale_fill_viridis_d() +  # Use viridis_d() for the color-blind friendly palette
+  ggtitle("Worker Dry Weight(g)") +
+  labs(y = "Count", x = "Weight (g)")
+
+shapiro.test(workers$dry_weight)
+
+
+workers$logdry <- log(workers$dry_weight)
+
+shapiro.test(workers$logdry)
+
+ggplot(workers, aes(x = logdry, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.05, col = I("black")) +
+  scale_fill_viridis_d() +  # Use viridis_d() for the color-blind friendly palette
+  ggtitle("Worker Dry Weight(g)") +
+  labs(y = "Count", x = "Weight (g)")
+
+```
+
+
+```{r}
+
+wrkdry.int <- lmer(logdry ~ treatment*whole.mean + alive_at_end + colony_duration + days_alive + (1|colony), data = workers)
+wrkdry1 <- lmer(logdry ~ treatment + whole.mean + alive_at_end + colony_duration + days_alive + (1|colony), data = workers)
+
+anova(wrkdry.int, wrkdry1)
+
+drop1(wrkdry1, test = "Chisq")
+
+wd1 <- update(wrkdry1, .~. -alive_at_end)
+drop1(wd1, test = "Chisq")
+
+wd2 <- update(wd1, .~. -days_alive)
+drop1(wd1, test = "Chisq")
+
+wd3 <- update(wd2, .~. -colony_duration)
+drop1(wd3, test = "Chisq")
+
+wd3
+Anova(wd3)
+wa <- setDT(as.data.frame(((Anova(wd3)))))
+wa
+
+workdry <- workers %>%
+  group_by(treatment) %>%
+  summarise(a.m= mean(dry_weight), 
+            sd.a = sd(dry_weight),
+            n.a = length(dry_weight)) %>%
+  mutate(sea = sd.a / sqrt(n.a))
+
+workdry <- setDT(workdry)
+workdry
+```
+
+
+```{r, fig.height= 12, fig.width= 12}
+workdryem <- emmeans(wmod3, ~treatment, type = "response")
+workdryem
+
+wp <- as.data.frame(pairs(workdryem))
+wp <- setDT(wp)
+wp
+
+wde <- as.data.frame(workdryem)
+wde2 <- setDT(wde)
+wde2
+
+workcld <- cld(object = workdryem, 
+               adjust = "TUkey",
+               alpha = 0.05,
+               Letters = letters)
+workcld
+
+emmdf2 <- as.data.frame(workcld)
+
+emmdf2
+
+
+workdry$plot <- workdry$a.m + workdry$sea
+
+ggplot(data = workdry, aes(x = treatment, y = a.m, fill = treatment)) +
+  geom_col(col = "black") +
+  coord_cartesian(ylim = c(0, 0.06)) +
+  scale_fill_viridis_d() +  # Use viridis_d() for the color-blind friendly palette
+  geom_errorbar(aes(ymax = a.m + sea, ymin = a.m - sea),
+                position = position_dodge(2), width = 0.4, size = 1.5) +
+  labs(y = "Average Worker Dry Weight(g)") +
+  ggtitle("Average Worker Dry Weight(g) by Treatment") +
+  scale_x_discrete(
+    name = "Treatment",
+    labels = c("0 PPB", "150 PPB", "1,500 PPB", "15,000 PPB", "150,000 PPB")
+  ) +
+  theme_classic(base_size = 30) +  # Adjust the base_size as needed
+  annotate(
+    geom = "text",
+    x = 1, y = 0.06,
+    label = " p = 0.74",
+    size = 15  # Adjust the size of the annotation text as needed
+  ) +
+  annotate(
+    geom = "text",
+    x = c(1, 5, 2, 4, 3),
+    y = c(0.055, 0.055, 0.054, 0.057, 0.056),
+    label = c("a", "a", "a", "a", "a"),
+    size = 20  # Adjust the size of the annotation text as needed
+  ) +
+  theme(legend.position = "none")
+
+```
+
+```{r, fig.width= 12, fig.height= 10}
+ggplot(workers, aes(x = whole.mean, y = dry_weight, color = treatment)) +
+  geom_point(size = 5)+
+  ggtitle("Amount of Pollen  Consumed vs. Average Worker Dry Weight")+
+  xlab("Mean Polen Consumption(g)") +
+  ylab("Mean Dry Weight(g)") +
+  scale_fill_viridis_d() +
+  theme(text = element_text(size = 20)) +
+  geom_smooth(method = "lm", color = "black")
+```
+
+
+# Worker Survival 
+
+## Survival 
+
+```{r, fig.width= 12, fig.height= 10}
+workers$survived <- as.logical(workers$survived)
+
+wrksurvive1 <- glmer.nb(survived ~ treatment + whole.mean + (1|colony), data = workers)
+drop1(wrksurvive1, test = "Chisq")
+
+surv <- workers %>%
+  group_by(colony) %>%
+  summarise(died = sum(died))
+
+surv
+
+dead.sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mean = mean(dead),
+            sd = sd(dead),
+            n = length(dead)) %>%
+  mutate(se = sd/sqrt(n))
+
+dead.sum
+dead.sum$plot <- dead.sum$mean + dead.sum$se
+
+deadmod <- glm.nb(dead ~ treatment + whole.mean + duration + replicate, data = brood)
+drop1(deadmod, test = "Chisq")
+summary(deadmod)
+Anova(deadmod)
+
+dm <- emmeans(deadmod, pairwise ~ treatment, type = "response")
+pairs(dm)
+
+cld <- cld(object = dm,
+           alpha = 0.5,
+           Letters = letters,
+           adjust = "Tukey")
+
+cld
+
+ggplot(data = dead.sum, aes(x=treatment, y=mean, fill=treatment)) + 
+  geom_col(position = "dodge", color = "black") +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) + 
+  coord_cartesian(ylim = c(0,3)) +
+  labs(x = "Treatment", y = "Count", title ="Average Count of Dead Workers per Treatment") +
+  theme(text = element_text(size = 20)) +                 
+ annotate(geom = "text", 
+          x = 1, y = 3,
+          label = "P = 0.01",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(dead.sum$plot + 0.3),
+           label = c("c", "ab", "ab", "bc", "a"),
+           size = 8) +
+  theme(legend.position =  "none")
+
+```
+
+
+```{r}
+wrkdays1 <- glmer.nb(days_alive ~ treatment + whole.mean + (1|colony), data = workers)
+
+drop1(wrkdays1, test = "Chisq")
+
+Anova(wrkdays1)
+
+```
+
+## cbind workers
+
+```{r, fig.width= 8, fig.height=6}
+cbw1 <- glm(cbind(alive, dead) ~ treatment + whole.mean + qro + duration, data = cbindworkers, family = binomial("logit"))
+cbw2 <- glm(cbind(alive, dead) ~ treatment + whole.mean + replicate + duration, data = cbindworkers, family = binomial("logit"))
+anova(cbw1, cbw2, test = "Chisq")
+AIC(cbw1, cbw2)
+
+drop1(cbw1, test = "Chisq")
+
+plot(cbw1)
+plot(cbw2)
+
+cbw1
+Anova(cbw1)
+
+acw <- setDT(as.data.frame(Anova(cbw1)))
+acw
+
+summary(cbw1)
+emm1 <- emmeans(cbw1, pairwise ~ treatment, type = "response")
+pairs(emm1)
+emm1
+emmdf <- as.data.frame(emm1$contrasts)
+emmdf
+
+workcld <- cld(object = emm1,
+               adjust = "Tukey",
+               alpha = 0.05,
+               Letters = letters)
+
+workcld 
+
+workcld <- as.data.frame(workcld)
+
+workcld$plot <- workcld$prob + workcld$asymp.UCL
+
+workcld
+
+ggplot(data = workcld, aes(x=treatment, y=prob, fill=treatment)) + 
+  geom_col(position = "dodge", color = "black") +
+  geom_errorbar(aes(ymin = prob - SE, ymax = prob + SE), width = 0.2, position = position_dodge(0.9)) + 
+  coord_cartesian(ylim = c(0,1.3)) +
+  labs(x = "Treatment", y = "Probability of Survival", title ="Probability of Worker Survival for Duration of Experiment") +
+  theme(text = element_text(size = 20)) +                    
+   annotate(geom = "text", 
+          x = 1, y = 1.2,
+          label = "P < 0.001",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(0.75, 1.1, 1.1, 1, 1.1),
+           label = c("a", "ab", "b", "ab", "b"),
+           size = 8) +
+  theme(legend.position =  "none")
+
+work_surv_bw <- ggplot(data = workcld, aes(x=treatment, y=prob, fill=treatment)) + 
+  geom_col(position = "dodge", color = "black") +
+  geom_errorbar(aes(ymin = prob - SE, ymax = prob + SE), width = 0.2, position = position_dodge(0.9)) + 
+  coord_cartesian(ylim = c(0,1.3)) +
+  labs(x = "Treatment", y = "Worker Probability of Survival") +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +
+  theme(text = element_text(size = 20)) +   
+  theme_cowplot() +
+  scale_fill_grey() +
+   annotate(geom = "text", 
+          x = 1, y = 1.2,
+          label = "P < 0.001",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(0.75, 1.1, 1.1, 1, 1.1),
+           label = c("a", "ab", "b", "ab", "b"),
+           size = 8) +
+ theme(legend.position = "none",
+        axis.text = element_text(size = 20),  # Set axis label font size
+        axis.title = element_text(size = 20))  # Set axis title font size
+
+work_surv_col <- ggplot(data = workcld, aes(x=treatment, y=prob, fill=treatment)) + 
+  geom_col(position = "dodge", color = "black") +
+  geom_errorbar(aes(ymin = prob - SE, ymax = prob + SE), width = 0.2, position = position_dodge(0.9)) + 
+  coord_cartesian(ylim = c(0,1.3)) +
+  labs(x = "Treatment", y = "Worker Probability of Survival") +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +
+  theme_cowplot() +
+  scale_fill_viridis_d() +
+   annotate(geom = "text", 
+          x = 1, y = 1.2,
+          label = "P < 0.001",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(0.75, 1.1, 1.1, 1, 1.1),
+           label = c("a", "ab", "b", "ab", "b"),
+           size = 8) +
+ theme(legend.position = "none",
+        axis.text = element_text(size = 20),  # Set axis label font size
+        axis.title = element_text(size = 20)) +  # Set axis title font size
+    theme(text = element_text(size = 20)) 
+```
+
+
+##### coxph workers
+
+```{r}
+
+workers <- workers %>% mutate(worker_id = row_number())
+workers$worker_id <- as.factor(workers$worker_id)
+
+library(survminer)
+
+res.cox <- coxph(Surv(days_alive, alive_at_end) ~ treatment + whole.mean + qro + cluster(worker_id), data = workers)
+
+res.cox
+summary(res.cox)
+
+Anova(res.cox)
+
+emm.cox <- emmeans(res.cox, pairwise ~ treatment, type = "response")
+pairs(emm.cox)
+
+surv_model <- survfit(res.cox, data = workers)
+
+# Plot the survival curves using ggsurvplot
+ggsurvplot(surv_model, color = "#2E9FDF", ggtheme = theme_minimal())
+
+
+
+surv_model <- survfit(res.cox, data = workers)
+
+require("survival")
+fit <- survfit(Surv(days_alive, alive_at_end) ~ treatment, data = workers)
+
+ggsurvplot(fit, data = workers)
+
+
+```
+
+
+
+### Brood Production
+
+
+```{r}
+
+#Variables to keep = duration, treatment, whole mean, number alive, block, and qro 
+
+brood1 <- glm.nb(brood_cells ~ treatment + whole.mean + alive + duration, data = brood)
+brood2 <- glm.nb(brood_cells ~ treatment + whole.mean + alive + duration + replicate, data = brood)
+emmeans(brood1, pairwise ~ treatment)
+brood2 <- glm(brood_cells ~ treatment + whole.mean + alive + duration + replicate + qro, data = brood, family = "poisson") #overdispersed
+summary(brood2)
+drop1(brood1, test = "Chisq")
+brood4 <- glm.nb(brood_cells ~ treatment*whole.mean + alive + duration, data = brood)
+anova(brood1, brood4, test = "Chisq")
+
+AIC(brood1, brood4)
+
+drop1(brood1, test = "Chisq")
+brood3 <- update(brood1, .~. -duration)
+anova(brood1, brood3, test = "Chisq")
+AIC(brood1, brood3)
+
+ab <- setDT(as.data.frame(Anova(brood3)))
+ab
+
+Anova(brood3)
+
+brood3
+summary(brood3)
+
+emb1 <- emmeans(brood3, "treatment", type = "response")
+emb <- setDT(as.data.frame(emb1))
+emb
+
+pemb <- pairs(emb1)
+pemb <- setDT(as.data.frame(pemb))
+pemb
+
+brood_sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mb = mean(brood_cells),
+            nb = length(brood_cells), 
+            sdb = sd(brood_cells)) %>%
+  mutate(seb = (sdb/sqrt(nb)))
+brood_sum
+bsdt <- setDT(brood_sum)
+bsdt
+
+plot(brood$treatment, brood$brood_cells)
+
+
+ggplot(brood, aes(x = treatment, y = brood_cells, fill = treatment)) +
+  geom_boxplot(alpha = 0.8, width = 0.5, outlier.shape = NA) +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Mean Count of Brood Cells", title = "Count of Brood Cells by Treatment") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+
+```
+
+
+### Eggs
+
+```{r}
+
+
+e1 <- glm.nb(eggs ~ treatment + whole.mean + alive + duration + replicate, data = brood)
+e2 <- glm.nb(eggs ~ treatment*whole.mean + alive + duration + replicate, data = brood)
+
+e3 <- glm(eggs~treatment + whole.mean + alive + duration + replicate, data = brood, family = "poisson")  #overdispersed
+summary(e3)
+
+anova(e1, e2, test = "Chisq")  
+AIC(e1, e2)
+
+drop1(e1, test = "Chisq")
+e4 <- update(e1, .~. -duration)
+drop1(e4, test = "Chisq")
+e5 <- update(e4, .~. -alive)
+drop1(e5, test = "Chisq")
+
+anova(e4, e5, test = "Chisq")  
+
+summary(e5)
+e5
+
+ea <- setDT(as.data.frame(Anova(e5)))
+ea
+
+em <- emmeans(e5, pairwise ~ "treatment", type = "response")
+
+emc <- setDT(as.data.frame(em$contrasts))
+emc
+
+emm <- setDT(as.data.frame(em$emmeans))
+emm
+
+
+ggplot(brood, aes(x = treatment, y = eggs, fill = treatment)) +
+  geom_boxplot(alpha = 0.8, width = 0.5, outlier.shape = NA) +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Mean Count of Eggs", title = "Count of Eggs by Treatment") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+range(brood$eggs)
+
+brood.sub <- brood[brood$eggs <= 50, ]
+
+range(brood.sub$eggs)
+
+ggplot(brood.sub, aes(x = treatment, y = eggs, fill = treatment)) +
+  geom_boxplot(alpha = 0.8, width = 0.5, outlier.shape = NA) +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Mean Count of Eggs", title = "Count of Eggs by Treatment") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+egg_sum1 <- brood %>%
+  group_by(treatment) %>%
+  summarise(me = mean(eggs),
+            sde = sd(eggs),
+            ne = length(eggs)) %>%
+  mutate(see = sde/sqrt(ne))
+egg_sum1
+
+
+ggplot(egg_sum1, aes(x = treatment, y = me)) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "black") +
+  geom_errorbar(aes(ymin = me - see, ymax = me + see), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Eggs", title = "Average Egg Count by Treatment (with the outlier of 87 eggs in T1.5)") +
+  theme_minimal()
+
+egg_sum <- brood.sub %>%
+  group_by(treatment) %>%
+  summarise(me = mean(eggs),
+            sde = sd(eggs),
+            ne = length(eggs)) %>%
+  mutate(see = sde/sqrt(ne))
+egg_sum
+
+
+ggplot(egg_sum, aes(x = treatment, y = me)) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "black") +
+  geom_errorbar(aes(ymin = me - see, ymax = me + see), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Eggs", title = "Average Egg Count by Treatment (without the outlier of 87 eggs in T1.5)") +
+  theme_minimal()
+
+e1 <- glm.nb(eggs ~ treatment + whole.mean, data = brood.sub)
+
+Anova(e1)
+
+```
+
+
+
+
+```{r}
+
+Anova(e5)
+
+summary(e5)
+
+egm.rep <- emmeans(e5, pairwise ~ replicate, type = "response")
+
+summary(egm.rep)
+
+anova(e5)
+
+pairs(egm.rep)
+
+eggs.letters <-  cld(object = egm.rep,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+
+
+eggs.letters
+
+egg_sum.rep <- brood %>%
+  group_by(replicate) %>%
+  summarise(me = mean(eggs),
+            sde = sd(eggs),
+            ne = length(eggs)) %>%
+  mutate(see = sde/sqrt(ne))
+
+egg_sum.rep$plot <- egg_sum.rep$me + egg_sum.rep$see
+egg_sum.rep
+
+ggplot(egg_sum.rep, aes(x = replicate, y = me, fill = replicate)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_errorbar(aes(ymin = me - see, ymax = me + see), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Location in Rearing Room", y = "Eggs") +
+  theme_classic(base_size = 30)+
+  theme_cowplot() +
+  coord_cartesian(ylim = c(0,48)) +
+  scale_fill_viridis_d() +
+  annotate(geom = "text",
+           label = "P < 0.01",
+           x = 1, y = 41) + 
+  annotate(geom =  "text",
+           label = c("a", "a", "a", "a", "a", "a", "a", "a", "a"),
+           x = c(1, 2, 3, 4, 5, 6, 7, 8, 9),
+           y = c(egg_sum.rep$plot + 2)) +
+  theme(legend.position = "none") +
+    scale_x_discrete(labels = c("1", "2", "3", "4", "5", "6", "7", "8", "9"))
+
+```
+
+
+### Honey Pots
+
+```{r}
+
+hp1 <- glm.nb(honey_pot ~ treatment + whole.mean + alive + duration + replicate, data = brood)
+hp2 <- glm.nb(honey_pot ~ treatment*whole.mean + alive + duration + replicate, data=brood)
+hp3 <- glm(honey_pot ~ treatment + whole.mean + alive + duration + replicate, data = brood, family = "poisson")
+summary(hp3) 
+anova(hp1, hp2, test ="Chisq")
+
+descdist(brood$honey_pot, discrete = TRUE)
+
+plot(hp3)
+plot(hp1)
+
+Anova(hp1)
+Anova(hp3)
+
+AIC(hp1, hp3)
+
+drop1(hp1, test = "Chisq")
+drop1(hp3, test = "Chisq")
+
+hp5 <- update(hp1, .~. -duration)
+drop1(hp5, test = "Chisq")
+hp4 <- update(hp5, .~. -replicate)
+drop1(hp4, test = "Chisq")
+
+Anova(hp4)  #this is what we are keeping
+Anova(hp5)
+
+plot(brood$alive, brood$honey_pot)
+
+ha <- setDT(as.data.frame(Anova(hp4)))
+ha
+hp4
+
+ggplot(brood, aes(x = treatment, y = honey_pot, fill = treatment)) +
+  geom_boxplot(alpha = 0.8, width = 0.5, outlier.shape = NA) +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Mean Count of Honey Pots", title = "Count of Honey Pots by Treatment") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+hp_sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mhp = mean(honey_pot), 
+            sdhp = sd(honey_pot),
+            nhp = length(honey_pot)) %>%
+  mutate(sehp = sdhp/sqrt(nhp))
+
+
+hp.means <- emmeans(object = hp4,
+                        specs = "treatment",
+                        adjust = "Tukey",
+                        type = "response")
+
+hpem <- setDT(as.data.frame(hp.means))
+hpem
+
+hpa <- setDT(as.data.frame(pairs(hp.means)))
+hpa
+
+hp.cld.model <- cld(object = hp.means,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+hp.cld.model
+
+ggplot(hp_sum, aes(x = treatment, y = mhp)) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "black") +
+  geom_errorbar(aes(ymin = mhp - sehp, ymax = mhp + sehp), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Honey Pot Count", title = "Average Honey Pots by Treatment") +
+  theme_minimal()
+
+```
+
+
+### Larvae and Pupae
+
+```{r}
+
+brood$larvae <- brood$dead_larvae + brood$live_larvae
+brood$pupae <- brood$dead_lp + brood$live_pupae
+
+#total count of larvae 
+bl1 <- glm.nb(larvae ~ treatment + whole.mean + alive + duration + replicate, data = brood)
+bl2 <- glm.nb(larvae ~ treatment*whole.mean + alive + duration + replicate, data = brood)
+bl3 <- glm(larvae ~ treatment + whole.mean + alive + duration + replicate, data = brood, family = "poisson") #overdispersed
+anova(bl1, bl2, test = "Chisq")
+AIC(bl1, bl2)
+summary(bl3)
+
+drop1(bl1, test = "Chisq")
+bl5 <- update(bl1, .~. -duration)
+drop1(bl5, test = "Chisq")
+
+Anova(bl5)
+ple <- emmeans(bl5, pairwise ~ treatment, type = "response")
+pairs(ple)
+
+
+#Larvae slightly different 
+larv_sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mhp = mean(larvae), 
+            sdhp = sd(larvae),
+            nhp = length(larvae)) %>%
+  mutate(sehp = sdhp/sqrt(nhp))
+
+L <- ggplot(larv_sum, aes(x = treatment, y = mhp)) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "black") +
+  geom_errorbar(aes(ymin = mhp - sehp, ymax = mhp + sehp), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Larvae Count", title = "Average Larvae by Treatment") +
+  theme_minimal()
+
+
+#total count of pupae 
+bp1 <- glm.nb(pupae ~ treatment + whole.mean + alive + duration + replicate, data = brood)
+bp2 <- glm.nb(pupae ~treatment*whole.mean + alive + duration + replicate, data = brood)
+bp3 <- glm(pupae ~ treatment + whole.mean + alive + duration + replicate, data = brood, family = "poisson") #overdispersed
+anova(bp1, bp2, test = "Chisq")
+AIC(bp1, bp2)
+summary(bp3)
+
+drop1(bp1, test = "Chisq")
+bp4 <- update(bp1, .~. -duration)
+drop1(bp4, test = "Chisq")
+bp5 <- update(bp4, .~. -alive)
+drop1(bp5, test ="Chisq")
+
+Anova(bp5)
+pe <- emmeans(bp5, pairwise ~ treatment, type = "response")
+pairs(pe)
+
+pup_sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mhp = mean(pupae), 
+            sdhp = sd(pupae),
+            nhp = length(pupae)) %>%
+  mutate(sehp = sdhp/sqrt(nhp))
+
+P <- ggplot(pup_sum, aes(x = treatment, y = mhp)) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "black") +
+  geom_errorbar(aes(ymin = mhp - sehp, ymax = mhp + sehp), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Pupae Count", title = "Average Pupae by Treatment") +
+  theme_minimal()
+
+
+library(ggpubr)
+plot_grid(L, P, ncol=2, nrow =1)
+
+```
+
+
+
+```{r}
+#total count of dead larvae 
+bdlfinal<- glm.nb(dead_larvae ~ treatment + whole.mean, data = brood)
+drop1(bdlfinal, test = "Chisq")
+summary(bdlfinal)
+
+
+bdl1 <- glm.nb(dead_larvae ~ treatment + whole.mean + alive + duration + replicate, data = brood)
+drop1(bdl1, test = "Chisq")
+bdl11 <- update(bdl1, .~. -alive)
+drop1(bdl11, test = "Chisq")
+summary(bdl11)
+
+bdl2 <- glm.nb(dead_larvae ~ treatment*whole.mean + alive + duration, data = brood)
+drop1(bdl2, test = "Chisq")
+bdl3 <- glm(dead_larvae ~ treatment + whole.mean + alive + duration + replicate, data = brood, family = "poisson") #overdispersed
+summary(bdl3)
+drop1(bdl3, test = "Chisq")
+anova(bdl1, bdl2, test = "Chisq")
+AIC(bdl1, bdl2)
+AIC(bdl2, bdl3)
+
+drop1(bdl3, test = "Chisq")
+bdl4 <- update(bdl3, .~. -alive)
+drop1(bdl4, test = "Chisq")
+summary(bdl4)
+Anova(bdl4)
+
+
+bdlfinal
+bdlA <- setDT(as.data.frame(Anova(bdlfinal)))
+bdlA
+
+dle <- emmeans(bdlfinal, pairwise ~ treatment, type = "response")
+dlem <- setDT(as.data.frame(dle$emmeans))
+dlcm <- setDT(as.data.frame(dle$contrasts))
+dlem
+dlcm
+
+#total count of dead pupae
+bdp1 <- glm.nb(dead_pupae ~ treatment + whole.mean + alive + duration + replicate, data = brood)
+bdp2 <- glm.nb(dead_pupae ~ treatment*whole.mean + alive + duration + replicate,data = brood)
+bdp3 <- glm(dead_pupae ~ treatment + whole.mean + alive + duration + replicate, data = brood, family = "poisson") #overdispersed
+summary(bdp3)
+anova(bdp1, bdp2, test = "Chisq")
+AIC(bdp1, bdp2)
+
+drop1(bdp1, test = "Chisq")
+bdp4 <- update(bdp1, .~. -duration)
+drop1(bdp4, test = "Chisq")
+bdp4 <- update(bdp4, .~. -alive)
+drop1(bdp4, test = "Chisq")
+
+Anova(bdp4)
+bdp4
+summary(bdp4)
+bdpa <- setDT(as.data.frame(Anova(bdp4)))
+bdpa
+
+dpe <- emmeans(bdp4, pairwise ~ treatment, type = "response")
+pairs(dpe)
+dpem <- setDT(as.data.frame(dpe$emmeans))
+dpcm <- setDT(as.data.frame(dpe$contrasts))
+dpem
+dpem1 <- as.data.frame(dpem)
+dpcm
+
+ggplot(brood, aes(x = treatment, y = dead_pupae, fill = treatment)) +
+  geom_boxplot(alpha = 0.8, width = 0.5) +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Mean Count", title = "Average Count of Dead Pupae by Treatment") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+#One seemingly outlier in treatment 2
+
+
+brood.sub1 <- brood[brood$dead_pupae <= 30, ]
+
+bdp1 <- glm.nb(dead_pupae ~ treatment + whole.mean + alive + duration + replicate, data = brood.sub1)
+bdp2 <- glm.nb(dead_pupae ~ treatment*whole.mean + alive + duration + replicate, data = brood.sub1)
+bdp3 <- glm(dead_pupae ~ treatment + whole.mean + alive + duration + replicate, data = brood.sub1, family = "poisson") #not super overdispersed
+summary(bdp3)
+anova(bdp1, bdp2, test = "Chisq")
+AIC(bdp1, bdp2)
+AIC(bdp3)
+
+drop1(bdp3, test = "Chisq")
+bdp4 <- update(bdp1, .~. -alive)
+drop1(bdp4, test = "Chisq")
+bdp4 <- update(bdp4, .~. -replicate)
+drop1(bdp4, test = "Chisq")
+bdp4 <- update(bdp4, .~. -duration)
+
+Anova(bdp4)
+bdp4
+
+bdpa <- setDT(as.data.frame(Anova(bdp4)))
+bdpa
+
+dpe <- emmeans(bdp4, pairwise ~ treatment, type = "response")
+pairs(dpe)
+dpem <- setDT(as.data.frame(dpe$emmeans))
+dpcm <- setDT(as.data.frame(dpe$contrasts))
+dpem
+dpcm
+
+ggplot(brood.sub1, aes(x = treatment, y = dead_pupae, fill = treatment)) +
+  geom_boxplot(alpha = 0.8, width = 0.5) +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Mean Count", title = "Average Count of Dead Pupae by Treatment") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+deadpupmeans <- emmeans(object = bdp4, 
+                          specs = "treatment",
+                          adjust = "Tukey",
+                          type = "response")
+
+deadpup.cld.model <- cld(object = deadpupmeans,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+deadpup.cld.model
+
+deadpup.means <- as.data.frame(deadpupmeans)
+
+dp_max <- brood.sub1 %>%
+  group_by(treatment) %>%
+  summarize(maxdp = max((dead_pupae)))
+
+
+dpsum <- brood.sub1 %>%
+  group_by(treatment) %>%
+  summarise(mean = mean(dead_pupae), 
+            sd = sd(dead_pupae),
+            n = length(dead_pupae)) %>%
+  mutate(se = sd/sqrt(n))
+dpsum
+
+ggplot(dpsum, aes(x = treatment, y = mean)) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "black") +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Dead Pupae Count", title = "Average Dead Pupae by Treatment") +
+  theme_minimal()
+  
+
+```
+
+
+```{r, fig.width=8, fig.height=6}
+count_pup_col <- ggplot(dpem1, aes(x = treatment, y = response, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = response - SE, ymax = response + SE), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Dead Pupae Count") +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +
+   theme_cowplot() +
+  theme_cowplot() +
+    coord_cartesian(ylim=c(0,7.6)) +
+  annotate(geom = "text", 
+          x = 1, y = 7,
+          label = "P < 0.01",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c((dpem1$response + dpem1$SE) + 0.3) ,
+           label = c("a", "ab", "b", "a", "ab"),
+           size = 8) +
+theme(legend.position = "none",
+        axis.text = element_text(size = 20),  # Set axis label font size
+       axis.title = element_text(size = 20)) +  # Set axis title font size
+   theme(text = element_text(size = 20))
+
+count_pup_bw <- ggplot(dpem1, aes(x = treatment, y = response, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_grey() +
+  geom_errorbar(aes(ymin = response - SE, ymax = response + SE), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Dead Pupae Count") +
+    scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +
+   theme_cowplot() +
+  theme_cowplot() +
+    coord_cartesian(ylim=c(0,7.6)) +
+  annotate(geom = "text", 
+          x = 1, y = 7,
+          label = "P < 0.01",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c((dpem1$response + dpem1$SE) + 0.3) ,
+           label = c("a", "ab", "b", "a", "ab"),
+           size = 8) +
+theme(legend.position = "none",
+        axis.text = element_text(size = 20),  # Set axis label font size
+       axis.title = element_text(size = 20)) +  # Set axis title font size
+   theme(text = element_text(size = 20))
+```
+
+
+#### cbind larvae and pupae 
+
+```{r, fig.width= 14, fig.height= 10}
+mod1 <- glm(cbind(alive_lp, dead_lp) ~ treatment + whole.mean + alive + duration + replicate, data = brood, family = binomial("logit"))
+summary(mod1)
+qqnorm(resid(mod1));qqline(resid(mod1))
+Anova(mod1)
+plot(mod1)
+drop1(mod1, test = "Chisq")
+
+
+
+mod3 <- update(mod1, .~. -duration)
+drop1(mod3, test = "Chisq")
+
+mod3
+me <- emmeans(mod3, pairwise~treatment, type = "response")
+me
+mem <- setDT(as.data.frame(me$emmeans))
+mcm <- setDT(as.data.frame(me$contrasts))
+mem
+mcm
+alp <- setDT(as.data.frame(Anova(mod3)))
+alp
+
+mem$plot <- mem$prob + mem$SE
+
+mem
+
+mod3
+
+sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mean.l = mean(alive_lp),
+            mean.d = mean(dead_lp))
+
+
+sum$prob.alive <- (sum$mean.l)/(sum$mean.d + sum$mean.l)
+sum
+
+
+cldb <- cld(object = me,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+cldb
+
+
+ggplot(mem, aes(x = treatment, y = prob, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = prob - SE, ymax = prob + SE), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Probability", title = "Probability of Brood Being Alive Upon Dissection") +
+   theme_classic(base_size = 30) +
+    coord_cartesian(ylim=c(0.5,1)) +
+  annotate(geom = "text", 
+          x = 3, y = 1 ,
+          label = "P < 0.001",
+          size = 12) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(mem$plot + 0.05),
+           label = c("c", "a", "ab", "ab", "bc"),
+           size = 12) +
+  theme(legend.position =  "none")
+
+
+```
+
+
+```{r, fig.width= 14, fig.height= 10}
+me <- emmeans(mod3, pairwise~replicate, type = "response")
+
+me
+
+mem <- setDT(as.data.frame(me$emmeans))
+
+mem$plot <- mem$prob + mem$SE
+
+mem
+
+mod3
+
+sum <- brood %>%
+  group_by(replicate) %>%
+  summarise(mean.l = mean(alive_lp),
+            mean.d = mean(dead_lp))
+
+
+sum$prob.alive <- (sum$mean.l)/(sum$mean.d + sum$mean.l)
+sum
+
+
+cldb <- cld(object = me,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+cldb
+
+
+ggplot(mem, aes(x = replicate, y = prob, fill = replicate)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = prob - SE, ymax = prob + SE), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Location in Rearing Room", y = "Probability") +
+   theme_classic(base_size = 30) +
+    coord_cartesian(ylim=c(0,1.05)) +
+   theme(legend.position =  "none") +
+  annotate(geom = "text",
+        label = "P < 0.05",
+            x = 1, y = 1.05, 
+        size = 10) + 
+   annotate(geom =  "text",
+            label = c("c", "bc", "b", "b", "bc", "b", "c", "bc", "a"),
+            x = c(1, 2, 3, 4, 5, 6, 7, 8, 9),
+            y = c(mem$plot + 0.04),
+            size = 10) +
+   theme(legend.position = "none") +
+   scale_x_discrete(labels = c("1", "2", "3", "4", "5", "6", "7", "8", "9"))
+```
+
+
+
+
+#### Pupae cbind
+
+```{r, fig.width= 13, fig.height=7}
+mod1 <- glm(cbind(live_pupae, dead_pupae) ~ treatment + whole.mean + alive + duration + replicate, data = brood, family = binomial("logit"))
+summary(mod1)
+qqnorm(resid(mod1));qqline(resid(mod1))
+Anova(mod1)
+drop1(mod1, test = "Chisq")
+
+
+mod3 <- update(mod1, .~. -alive)
+drop1(mod3, test = "Chisq")
+mod3 <- update(mod3, .~. -duration)
+drop1(mod3, test = "Chisq")
+mod3 <- update(mod3, .~. -whole.mean)
+drop1(mod3, test = "Chisq")
+
+plot(mod3)
+Anova(mod3)
+
+me <- emmeans(mod3, pairwise ~treatment, type = "response")
+me
+mem <- setDT(as.data.frame(me$emmeans))
+mcm <- setDT(as.data.frame(me$contrasts))
+mem
+mcm
+alp <- setDT(as.data.frame(Anova(mod3)))
+alp
+
+mem <- as.data.frame(me$emmeans)
+mem$plot <- mem$prob + mem$SE
+
+mem
+
+mod3
+
+
+sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mean.l = mean(live_pupae),
+            mean.d = mean(dead_pupae),
+            sd.l = sd(live_pupae),
+            sd.d = sd(dead_pupae),
+            n.l = length(live_pupae),
+            n.d = length(dead_pupae)) %>%
+  mutate(se.l = sd.l/sqrt(n.l),
+         se.d = sd.d/sqrt(n.d))
+
+sum.pupae <- brood %>%
+  group_by(treatment) %>%
+  summarise(mean.l = mean(live_pupae),
+            mean.d = mean(dead_pupae),
+            sd.l = sd(live_pupae),
+            sd.d = sd(dead_pupae),
+            n.l = length(live_pupae),
+            n.d = length(dead_pupae)) %>%
+  mutate(se.l = sd.l/sqrt(n.l),
+         se.d = sd.d/sqrt(n.d))
+
+sum.pupae$prob.alive <- (sum.pupae$mean.l)/(sum.pupae$mean.d + sum.pupae$mean.l)
+sum.pupae
+
+cldb <- cld(object = me,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+cldb
+
+
+ggplot(mem, aes(x = treatment, y = prob, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Probability", title = "Probability of Pupae Being Alive Upon Dissection") + geom_errorbar(aes(ymin = prob - SE, ymax = prob + SE), width = 0.2, position = position_dodge(0.9)) +
+   theme_classic(base_size = 30) +
+    coord_cartesian(ylim=c(0, 0.5)) +
+  annotate(geom = "text", 
+          x = 1, y = 1.1 ,
+          label = "P < 0.001",
+          size = 12) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(0.4, 0.4, 0.4, 0.4, 0.4),
+           label = c("b", "ab", "ab", "a", "ab"),
+           size = 12) +
+  theme(legend.position =  "none")
+```
+
+### Larvae cbind 
+
+```{r, fig.width= 8, fig.height=6}
+mod1 <- glm(cbind(live_larvae, dead_larvae) ~ treatment + whole.mean + alive + duration + replicate, data = brood, family = binomial("logit"))
+summary(mod1)
+qqnorm(resid(mod1));qqline(resid(mod1))
+Anova(mod1)
+plot(mod1)
+drop1(mod1, test = "Chisq")
+
+
+mod3 <- update(mod1, .~. -alive)
+drop1(mod3, test = "Chisq")
+
+plot(mod3)
+
+me <- emmeans(mod3, pairwise ~treatment, type = "response")
+me
+mem <- setDT(as.data.frame(me$emmeans))
+mcm <- setDT(as.data.frame(me$contrasts))
+mem
+mcm
+alp <- setDT(as.data.frame(Anova(mod3)))
+alp
+
+mem$plot <- mem$prob + mem$SE
+
+mem
+
+mod3
+
+sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(mean.l = mean(live_larvae),
+            mean.d = mean(dead_larvae),
+            sd.l = sd(live_larvae),
+            sd.d = sd(dead_larvae),
+            n.l = length(live_larvae),
+            n.d = length(dead_larvae)) %>%
+  mutate(se.l = sd.l/sqrt(n.l),
+         se.d = sd.d/sqrt(n.d))
+
+sum$prob.alive <- (sum$mean.l)/(sum$mean.d + sum$mean.l)
+sum
+
+
+cldb <- cld(object = me,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+cldb
+
+
+prob_brood_col <- ggplot(mem, aes(x = treatment, y = prob, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Larvae and Pupae Probability of Survival") +
+geom_errorbar(aes(ymin = prob - SE, ymax = prob + SE), width = 0.2, position = position_dodge(0.9)) +
+   theme_cowplot() +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +
+  theme_cowplot() + 
+    coord_cartesian(ylim=c(0.8,1.013)) +
+  annotate(geom = "text", 
+          x = 1, y = 1.01 ,
+          label = "P < 0.001",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(mem$plot + 0.01),
+           label = c("c", "a", "ab", "ab", "bc"),
+           size = 8) +
+theme(legend.position = "none",
+ axis.text = element_text(size = 20),  # Set axis label font size
+        axis.title = element_text(size = 20)) +  # Set axis title font size
+    theme(text = element_text(size = 20))
+
+prob_brood_bw <- ggplot(mem, aes(x = treatment, y = prob, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_grey() +
+  labs(x = "Treatment", y = "Larvae and Pupae Probability of Survival") +
+geom_errorbar(aes(ymin = prob - SE, ymax = prob + SE), width = 0.2, position = position_dodge(0.9)) +
+   theme_cowplot() +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +
+  theme_cowplot() + 
+    coord_cartesian(ylim=c(0.8,1.013)) +
+  annotate(geom = "text", 
+          x = 1, y = 1.01 ,
+          label = "P < 0.001",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(mem$plot + 0.01),
+           label = c("c", "a", "ab", "ab", "bc"),
+           size = 8) +
+theme(legend.position = "none",
+ axis.text = element_text(size = 20),  # Set axis label font size
+        axis.title = element_text(size = 20)) +  # Set axis title font size
+    theme(text = element_text(size = 20))
+```
+
+
+### Drone Count 
+
+```{r}
+drone.ce$sqr <- (drone.ce$count)^2
+
+dc1 <- glm.nb(count ~ treatment + whole.mean + alive + duration + replicate, data = drone.ce)
+dc2 <- glm.nb(count ~ treatment*whole.mean + alive + duration + replicate, data = drone.ce)
+dc3 <- glm(count ~ treatment + whole.mean + alive + duration + replicate, data = drone.ce, family = "poisson")
+summary(dc3) #overdispersed 
+
+dc1sq <- glm.nb(sqr ~ treatment + whole.mean + alive + duration + replicate, data = drone.ce)
+dc2sq <- glm.nb(sqr ~ treatment*whole.mean + alive + duration + replicate, data = drone.ce)
+dc3sq <- glm(sqr ~ treatment + whole.mean + alive + duration + replicate, data = drone.ce, family = "poisson")
+summary(dc3sq)
+
+anova(dc1, dc2, test = "Chisq")
+AIC(dc1, dc2)
+
+drop1(dc1, test = "Chisq")
+dc4 <- update(dc1, .~. -duration)
+drop1(dc4, test = "Chisq")
+summary(dc4)
+dc4 <- update(dc4, .~. -replicate)
+Anova(dc4)
+summary(dc4) 
+Anova(dc4)
+plot(dc4)
+
+drop1(dc1sq, test = "Chisq")
+dc4sq <- update(dc1sq, .~. -duration)
+drop1(dc4sq, test = "Chisq")
+
+sum <- drone.ce %>%
+  group_by(treatment) %>%
+  summarise(mean = mean(count), 
+            sd = sd(count),
+            n = length(count)) %>%
+  mutate(se = sd/sqrt(n))
+sum
+
+ggplot(sum, aes(x = treatment, y = mean)) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "black") +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Drone Count", title = "Average Drones Produced by Treatment") +
+  theme_minimal()
+
+
+dc4
+da <- setDT(as.data.frame(Anova(dc4)))
+da
+Anova(dc4)
+
+emdc <- emmeans(dc4, pairwise ~ "treatment", type = "response")
+em <- setDT(as.data.frame(emdc$emmeans))
+emc <- setDT(as.data.frame(emdc$contrasts))
+em
+emc
+```
+
+
+### Drone Emerge Time
+
+```{r, fig.width= 8, fig.height=6}
+
+drone.ce.na <- na.omit(drone.ce)
+
+drone.ce.na$sqr <- (drone.ce.na$emerge)^2
+
+descdist(drone.ce.na$emerge, discrete = TRUE)
+
+de1 <- glm(emerge ~ treatment + whole.mean + alive + replicate, data = drone.ce.na, family ="quasipoisson")
+summary(de1)
+
+de2 <- glm.nb(emerge ~ treatment*whole.mean + alive + replicate , data = drone.ce.na)
+summary(de2)
+
+de22 <- glm.nb(sqr ~ treatment + whole.mean + alive + replicate + drones, data = drone.ce.na)
+summary(de22)
+
+plot(de22)
+plot(de1)
+de4 <- glm(emerge ~ treatment + whole.mean + alive + replicate + qro, data = drone.ce.na, family = "poisson")
+summary(de2) #underdispersed 
+
+AIC(de1, de4)
+AIC(de1, de22)
+
+drop1(de22, test ="Chisq")
+de2 <- update(de22, .~. -alive)
+drop1(de2, test = "Chisq")
+Anova(de2)
+
+ggplot(drone.ce.na, aes(x = treatment, y = emerge, fill = treatment)) +
+  geom_boxplot(alpha = 0.8, width = 0.5, outlier.shape = NA) +
+  scale_fill_viridis_d() +
+  labs(x = "Treatment", y = "Mean Count of Days", title = "Days Until First Drone Emergence by Treatment") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+
+plot(de2)
+
+Anova(de2)
+
+de2
+
+ea <- setDT(as.data.frame(Anova(de2)))
+ea
+
+de2
+summary(de2)
+
+egm <- emmeans(de2, pairwise ~ treatment, type = "response")
+eg <- setDT(as.data.frame(egm$emmeans))
+eg
+cg <- setDT(as.data.frame(egm$contrasts))
+cg
+
+em_sum <- drone.ce.na %>%
+  group_by(treatment) %>%
+  summarise(mean = mean(emerge),
+            sd = sd(emerge),
+            n = length(emerge)) %>%
+  mutate(se = sd/sqrt(n))
+em_sum
+
+em_sum$plot <- (em_sum$mean + em_sum$se)
+
+cldemer <-  cld(object = egm,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+cldemer
+
+  
+
+
+em_color <- ggplot(em_sum, aes(x = treatment, y = mean, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Days") +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +  # Set x-axis labels
+  theme_cowplot() + 
+  coord_cartesian(ylim = c(30,41)) +
+  annotate(geom = "text",
+           label = "P < 0.05",
+           x = 1, y = 41,
+           size = 8) + 
+  annotate(geom = "text",
+           label = c("b", "ab", "b", "a", "ab"),
+           x = c(1, 2, 3, 4, 5),
+           y = c(em_sum$plot + 0.4), 
+           size = 8) +
+  theme(legend.position = "none",
+        axis.text = element_text(size = 20),  # Set axis label font size
+        axis.title = element_text(size = 20)) +  # Set axis title font size
+  theme(text = element_text(size = 20))
+
+em_color
+
+
+em_bw <- ggplot(em_sum, aes(x = treatment, y = mean, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+   scale_fill_grey() + 
+ geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Days") +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +  # Set x-axis labels
+  theme_cowplot() + 
+  coord_cartesian(ylim = c(30,41)) +
+  annotate(geom = "text",
+           label = "P < 0.05",
+           x = 1, y = 41,
+           size = 8) + 
+  annotate(geom = "text",
+           label = c("b", "ab", "b", "a", "ab"),
+           x = c(1, 2, 3, 4, 5),
+           y = c(em_sum$plot + 0.4), 
+           size = 8) +
+  theme(legend.position = "none",
+        axis.text = element_text(size = 20),  # Set axis label font size
+        axis.title = element_text(size = 20)) +  # Set axis title font size
+  theme(text = element_text(size = 20))
+
+
+
+ggplot(drone.ce.na, aes(x = whole.mean, y = emerge, color = treatment)) +
+  geom_point(size = 3) +
+  labs(x = "Average Pollen Consumed(g)", y = "Days", title = "Days Until First Drone Emergence by Average Pollen Consumed") +
+  theme_minimal() +
+  scale_color_viridis_d() +
+  geom_smooth(method = "lm", color = "pink", size = 1)
+```
+
+
+```{r, fig.width= 13, fig.height= 8}
+
+ggplot(drone.ce.na, aes(x = drones, y = emerge, color = treatment)) +
+  geom_point(size = 5)+
+  theme_cowplot() +
+  scale_color_viridis_d() +
+  geom_smooth(method = "lm", color = "black", size = 1) +
+  labs(y = "Days", x = "Count of Males")+
+  labs(color = "Treatment") +
+  theme_classic(base_size = 30) +
+  theme_cowplot() +
+ theme(
+ axis.text = element_text(size = 20),  # Set axis label font size
+         axis.title = element_text(size = 20)) +  # Set axis title font size
+     theme(text = element_text(size = 20))
+
+ggplot(drone.ce.na, aes(x = drones, y = emerge, color = treatment)) +
+  geom_point(size = 5) +
+  theme_cowplot() +
+  scale_color_viridis_d() +
+  geom_smooth(method = "lm", color = "black", size = 1) +
+  labs(y = "Days", x = "Count of Males") +
+  labs(color = "Treatment") +
+  scale_color_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +  # Set legend labels
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 20),  # Set axis label font size
+    axis.title = element_text(size = 20),  # Set axis title font size
+    text = element_text(size = 20)
+  )
+
+  
+```
+
+
+```{r}
+em_sum.rep <- drone.ce.na %>%
+  group_by(replicate) %>%
+  summarise(mean = mean(emerge),
+            sd = sd(emerge),
+            n = length(emerge)) %>%
+  mutate(se = sd/sqrt(n))
+
+em_sum.rep$plot <- (em_sum.rep$mean + em_sum.rep$se)
+
+egm.rep <- emmeans(de2, pairwise ~ replicate, type = "response")
+
+cldemer.rep <-  cld(object = egm.rep,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+
+cldemer.rep
+
+ggplot(em_sum.rep, aes(x = replicate, y = mean, fill = replicate)) +
+  geom_bar(stat = "identity", color = "black") +
+   scale_fill_viridis_d() + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Location in Rearing Room", y = "Days") +
+  theme_cowplot ()+
+  coord_cartesian(ylim = c(30,48)) +
+  annotate(geom = "text",
+           label = "P < 0.05",
+           x = 1, y = 45) + 
+  annotate(geom =  "text",
+           label = c("ab", "ab", "a", "a", "ab", "a", "ab", "a", "b"),
+           x = c(1, 2, 3, 4, 5, 6, 7, 8, 9),
+           y = c(em_sum.rep$plot + 0.8)) +
+  theme(legend.position = "none") +
+  scale_x_discrete(labels = c("1", "2", "3", "4", "5", "6", "7", "8", "9"))
+
+
+
+ggplot(drone.ce.na, aes(x = whole.mean, y = emerge, color = treatment)) +
+  geom_point(size = 3) +
+  labs(x = "Average Pollen Consumed(g)", y = "Days", title = "Days Until First Drone Emergence by Average Pollen Consumed") +
+  theme_minimal() +
+  scale_color_viridis_d() +
+  geom_smooth(method = "lm", color = "pink", size = 1)
+```
+
+
+### Drone Radial Cell 
+
+
+```{r, fig.width= 13, fig.height= 10}
+shapiro.test(drone.h$radial)
+n <- is.na(drone.h$radial)
+unique(n)
+drone.rad <- na.omit(drone.h)
+
+ggplot(drone.rad, aes(x=radial, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.05 ,col=I("black")) +
+  scale_fill_manual(values = c("gray90", "gray70", "gray50" , "gray30","gray10"),
+                    name = "Pristine Level",
+                    labels = c("Treatment 1 (control)", "Treatment 2", 
+                               "Treatment 3", "Treatment 4", "Treatment 5")) +
+  ggtitle("Drone Radial Cell Length(mm)") +
+  labs(y = "Count", x = "Length")
+shapiro.test(drone.rad$radial)
+
+drone.rad$sqr <- (drone.rad$radial)^2
+
+shapiro.test(drone.rad$sqr)
+
+ggplot(drone.rad, aes(x=sqr, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.5 ,col=I("black")) +
+  scale_fill_manual(values = c("gray90", "gray70", "gray50" , "gray30","gray10"),
+                    name = "Pristine Level",
+                    labels = c("Treatment 1 (control)", "Treatment 2", 
+                               "Treatment 3", "Treatment 4", "Treatment 5")) +
+  ggtitle("Drone Radial Cell Length(mm)") +
+  labs(y = "Count", x = "Length")
+
+dr1 <- lmer(radial ~ treatment + whole.mean + alive + duration + replicate + (1|colony), data = drone.rad)
+summary(dr1)
+dr2 <- lmer(radial ~ treatment + whole.mean + alive + duration + (1|colony), data = drone.rad)
+anova(dr1, dr2, test = "Chisq")
+dr3 <- lmer(radial ~ treatment*whole.mean + alive + duration + replicate + (1|colony), data = drone.rad)
+anova(dr1, dr3)
+
+dr1 <- lmer(sqr ~ treatment + whole.mean + alive + duration + replicate + (1|colony), data = drone.rad)
+dr2 <- lmer(sqr ~ treatment + whole.mean + alive + duration + (1|colony), data = drone.rad)
+anova(dr1, dr2, test = "Chisq")
+dr3 <- lmer(sqr~ treatment*whole.mean + alive + duration + replicate + (1|colony), data = drone.rad)
+anova(dr1, dr3)
+
+drop1(dr1, test = "Chisq")
+dr4 <- update(dr1, .~. -whole.mean)
+drop1(dr4, test = "Chisq")
+dr5 <- update(dr4, .~. -duration)
+drop1(dr5, test = "Chisq")
+dr6 <- update(dr5, .~. -replicate)
+drop1(dr6, test = "Chisq")
+anova(dr5, dr6)
+
+plot(dr5)
+qqnorm(resid(dr5));qqline(resid(dr5))
+plot(dr6)
+qqnorm(resid(dr6));qqline(resid(dr6))    #keep dr6
+
+
+dr6
+Anova(dr6)
+Anova(dr5)
+dra <- setDT(as.data.frame(Anova(dr6)))
+dra
+
+dre <- emmeans(dr6, pairwise ~ treatment, type = "response")
+edr <- setDT(as.data.frame(dre$emmeans))
+edr
+cdr <- setDT(as.data.frame(dre$contrasts))
+cdr
+
+sum <- drone.rad %>%
+  group_by(treatment) %>%
+  summarise(mean = mean(radial),
+            sd = sd(radial),
+            n = length(radial)) %>%
+  mutate(se = sd/sqrt(n))
+
+edr$plot <- (edr$emmean + edr$SE) + 0.5
+
+edr
+
+rad.cld <- cld(object =dre,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+
+rad.cld
+
+ggplot(edr, aes(x = treatment, y = emmean, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Squared Radial Cell Length(mm)", title = "Average Drone Radial Cell Length by Treatment (squared)") +
+   theme_classic(base_size = 25) +
+    coord_cartesian(ylim=c(0,7)) +
+  annotate(geom = "text", 
+          x = 3, y = 7,
+          label = "P > 0.05",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(edr$plot),
+           label = c("a", "a", "a", "a", "a"),
+           size = 8) +
+  theme(legend.position =  "none")
+
+```
+
+# Drone Dry Weight
+
+```{r}
+shapiro.test(drone.rad$dry_weight)
+
+ggplot(drone.rad, aes(x=dry_weight, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.001 ,col=I("black")) +
+  scale_fill_manual(values = c("gray90", "gray70", "gray50" , "gray30","gray10"),
+                    name = "Pristine Level",
+                    labels = c("Treatment 1 (control)", "Treatment 2", 
+                               "Treatment 3", "Treatment 4", "Treatment 5")) +
+  ggtitle("Drone Radial Cell Length(mm)") +
+  labs(y = "Count", x = "Length")
+
+dd1 <- lmer(dry_weight ~ treatment + whole.mean + alive + duration + replicate + (1|colony), data = drone.rad)
+dd8 <- lmer(dry_weight ~ treatment + whole.mean + alive + duration + (1|colony:replicate), data = drone.rad)
+dd9 <- lmer(dry_weight ~ treatment + whole.mean + alive + duration + qro + (1|colony:replicate), data = drone.rad)
+plot(dd8)
+anova(dd1, dd8)
+anova(dd8, dd9, dd1)
+anova(dd1, dd9)
+qqnorm(resid(dd8));qqline(resid(dd8))
+drop1(dd8, test = "Chisq")
+dd81 <- update(dd8, .~. -duration)
+drop1(dd81, test = "Chisq")
+dd82 <- update(dd81, .~. -whole.mean)
+Anova(dd82)
+qqnorm(resid(dd82));qqline(resid(dd81))
+plot(dd82)
+dd2 <- lmer(dry_weight ~ treatment*whole.mean + alive + duration + replicate + (1|colony), data = drone.rad)
+dd3 <- lmer(dry_weight ~ treatment + whole.mean + alive + duration + (1|colony), data = drone.rad)
+dd6 <- lmer(dry_weight ~ treatment + whole.mean + alive + duration + qro + (1|colony), data = drone.rad)
+anova(dd1, dd6)
+
+anova(dd1, dd2)
+anova(dd1, dd3)
+
+drop1(dd3, test = "Chisq")
+dd4 <- update(dd3, .~. -duration)
+drop1(dd4, test = "Chisq")
+dd5 <- update(dd4, .~. -whole.mean)
+anova(dd4, dd5)
+
+drop1(dd6, test = "Chisq")
+dd7 <- update(dd6, .~. -duration)
+drop1(dd7, test = "Chisq")
+dd8 <- update(dd7, .~. -whole.mean)
+anova(dd7, dd8)
+
+
+anova(dd5, dd8)  #with only one difference in variables (qro) dd5 is significantly better so we will stick with leaving out qro 
+
+qqnorm(resid(dd5));qqline(resid(dd5))
+qqnorm(resid(dd8));qqline(resid(dd8))
+
+
+dd5
+Anova(dd5)
+dda <- setDT(as.data.frame(Anova(dd5)))
+dda
+
+dem <- emmeans(dd5, pairwise ~ treatment, type = "response")
+de <- setDT(as.data.frame(dem$emmeans))
+ce <- setDT(as.data.frame(dem$contrasts))
+de
+ce
+
+de$plot <- de$emmean + de$SE
+
+
+dd.cld <- cld(object =dem,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+
+dd.cld
+
+de
+
+
+```
+
+
+```{r, fig.width= 8, fig.height= 6}
+
+
+dry_color <- ggplot(de, aes(x = treatment, y = emmean, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Dry Weight(g)") +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +  # Set x-axis labels
+  theme_cowplot() + 
+  coord_cartesian(ylim=c(0.02, 0.043)) +
+  annotate(geom = "text", 
+           x = 1, y = 0.0427 ,
+           label = "P < 0.01",
+           size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = rep(de$plot[1] + 0.001, 5),  # Adjusted y parameter to match the length
+           label = c("b", "ab", "a", "ab", "ab"),
+           size = 8) +
+  theme(legend.position = "none",
+        axis.text = element_text(size = 20),  # Set axis label font size
+        axis.title = element_text(size = 20)) +  # Set axis title font size
+  theme(text = element_text(size = 20))
+
+dry_color
+
+dry_bw <- ggplot(de, aes(x = treatment, y = emmean, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_grey() +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Dry Weight(g)") +
+   scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +  # Set x-axis labels
+  theme_cowplot() + 
+  coord_cartesian(ylim=c(0.02, 0.043)) +
+  annotate(geom = "text", 
+           x = 1, y = 0.0427 ,
+           label = "P < 0.01",
+           size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = rep(de$plot[1] + 0.001, 5),  # Adjusted y parameter to match the length
+           label = c("b", "ab", "a", "ab", "ab"),
+           size = 8) +
+  theme(legend.position = "none",
+        axis.text = element_text(size = 20),  # Set axis label font size
+        axis.title = element_text(size = 20)) +  # Set axis title font size
+  theme(text = element_text(size = 20))
+```
+
+
+### Drone Relative Fat
+
+```{r, fig.width= 14, fig.height= 8}
+
+
+shapiro.test(drone.rad$relative_fat)
+
+drone.rad$logrf <- log(drone.rad$relative_fat)
+
+shapiro.test(drone.rad$logrf)
+
+ggplot(drone.rad, aes(x=relative_fat, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.0001 ,col=I("black")) +
+  scale_fill_manual(values = c("gray90", "gray70", "gray50" , "gray30","gray10"),
+                    name = "Pristine Level",
+                    labels = c("Treatment 1 (control)", "Treatment 2", 
+                               "Treatment 3", "Treatment 4", "Treatment 5")) +
+  ggtitle("Drone Relative Fat") +
+  labs(y = "Count", x = "Relative Fat(g)")
+
+ggplot(drone.rad, aes(x=logrf, fill = treatment)) +
+  geom_histogram(position = "identity", binwidth = 0.1 ,col=I("black")) +
+  scale_fill_manual(values = c("gray90", "gray70", "gray50" , "gray30","gray10"),
+                    name = "Pristine Level",
+                    labels = c("Treatment 1 (control)", "Treatment 2", 
+                               "Treatment 3", "Treatment 4", "Treatment 5")) +
+  ggtitle("(Log) Drone Relative Fat") +
+  labs(y = "Count", x = "log(Realtive Fat)(g)")
+
+
+
+
+rf1 <- lmer(logrf ~ treatment + whole.mean + alive + duration + replicate + (1|colony), data = drone.rad)
+rf4 <- lmer(relative_fat ~ treatment + whole.mean + alive + duration + replicate + (1|colony), data = drone.rad)
+rf2 <- lmer(logrf ~ treatment*whole.mean + alive + duration + replicate +  (1|colony), data = drone.rad)
+
+anova(rf1,rf2)
+
+Anova(rf4)
+
+drop1(rf1, test = "Chisq")
+drop1(rf4, test = "Chisq")
+rf11 <- update(rf1, .~. -replicate)
+
+Anova(rf1)
+
+Anova(rf11)
+
+anova(rf11, rf1, test = "Chisq")
+
+rf1
+Anova(rf1)
+dda <- setDT(as.data.frame(Anova(rf1)))
+dda
+
+qqnorm(resid(rf1));qqline(resid(rf1))
+qqnorm(resid(rf4));qqline(resid(rf4))
+plot(rf1)
+plot(rf4)
+
+dem <- emmeans(rf1, pairwise ~ treatment, type = "response")
+de <- setDT(as.data.frame(dem$emmeans))
+ce <- setDT(as.data.frame(dem$contrasts))
+de
+ce
+
+
+predicted_log <-predict(rf1, newdata = drone.rad)
+predicted_original <- exp(predicted_log)
+result_df <- data.frame(predictors = drone.rad$treatment, predicted_original)
+
+sum <- result_df %>%
+  group_by(predictors) %>%
+  summarise(mean = mean(predicted_original),
+            sd = sd(predicted_original),
+            n=(length(predicted_original))) %>%
+  mutate(se = sd/sqrt(n))
+
+sum$plot <- (sum$mean + sum$se)
+
+sum
+
+ggplot(sum, aes(x = predictors, y = mean, fill = predictors)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Relative Fat (g)", title = "Average Drone Abdominal Relative Fat by Treatment") +
+   theme_classic(base_size = 30) +
+    coord_cartesian(ylim=c(0.00125, 0.002)) +
+  annotate(geom = "text", 
+          x = 3, y = 0.002 ,
+          label = "P < 0.01",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(sum$plot + 3e-05),
+           label = c("bc", "abc", "a", "ab", "c"),
+           size = 8) +
+  theme(legend.position =  "none")
+
+
+
+ggplot(drone.rad, aes(x = whole.mean, y = radial, color = treatment)) +
+  geom_point(size = 3) +
+  labs(x = "Average Pollen Consumed(g)", y = "Relative Fat(g)", title = "Drone Abdominal Relative Fat by Average Pollen Consumed") +
+  theme_minimal() +
+  scale_color_viridis_d() +
+  geom_smooth(method = "lm", color = "pink", size = 1) 
+
+
+```
+
+
+```{r, fig.width= 8, fig.height= 6}
+sum.rad <- drone.rad %>%
+  group_by(treatment) %>%
+  summarise(mean = mean(relative_fat),
+            sd = sd(relative_fat),
+            n=(length(relative_fat))) %>%
+  mutate(se = sd/sqrt(n))
+
+sum.rad$plot <- (sum.rad$mean + sum.rad$se)
+
+fat_col <- ggplot(sum.rad, aes(x = treatment, y = mean, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +
+  labs(x = "Treatment", y = "Relative Fat (g)") +
+theme_cowplot() +
+    coord_cartesian(ylim=c(0.00125, 0.0024)) +
+  annotate(geom = "text", 
+          x = 1.1, y = 0.0024 ,
+          label = "P < 0.01",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(sum.rad$plot + 0.0001),
+           label = c("bc", "abc", "a", "ab", "c"),
+           size = 8) +
+ theme(legend.position = "none",
+  axis.text = element_text(size = 20),  # Set axis label font size
+          axis.title = element_text(size = 20)) +  # Set axis title font size
+      theme(text = element_text(size = 20))
+
+fat_bw <- ggplot(sum.rad, aes(x = treatment, y = mean, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_grey() +
+ geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  scale_x_discrete(labels = c("0 ppb", "150 ppb", "1,500 ppb", "15,000 ppb", "150,000 ppb")) +
+  labs(x = "Treatment", y = "Relative Fat (g)") +
+theme_cowplot() +
+    coord_cartesian(ylim=c(0.00125, 0.0024)) +
+  annotate(geom = "text", 
+          x = 1.1, y = 0.0024 ,
+          label = "P < 0.01",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(sum.rad$plot + 0.0001),
+           label = c("bc", "abc", "a", "ab", "c"),
+           size = 8) +
+ theme(legend.position = "none",
+  axis.text = element_text(size = 20),  # Set axis label font size
+          axis.title = element_text(size = 20)) +  # Set axis title font size
+      theme(text = element_text(size = 20))
+```
+
+```{r, fig.width= 15, fig.height= 10}
+sum.rad <- drone.rad %>%
+  group_by(replicate) %>%
+  summarise(mean = mean(relative_fat),
+            sd = sd(relative_fat),
+            n=(length(relative_fat))) %>%
+  mutate(se = sd/sqrt(n))
+
+
+dem_rep <- emmeans(rf1, pairwise ~ replicate, type = "response")
+dd.cld_rep <- cld(object =dem_rep,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+
+dd.cld_rep
+sum.rad$plot <- (sum.rad$mean + sum.rad$se)
+
+ggplot(sum.rad, aes(x = replicate, y = mean, fill = replicate)) +
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_viridis_d() +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Location in Rearing Room", y = "Relative Fat (g)") +
+   theme_classic(base_size = 30) +
+    coord_cartesian(ylim=c(0.00125, 0.0026)) +
+  theme(legend.position =  "none") +
+     annotate(geom = "text",
+         label = "P < 0.05",
+             x = 1, y = 0.00243, 
+         size = 10) + 
+    annotate(geom =  "text",
+             label = c("a", "a", "a", "a", "a", "a", "a", "a", "a"),
+             x = c(1, 2, 3, 4, 5, 6, 7, 8, 9),
+             y = c(sum.rad$plot + 0.0001),
+             size = 10) +
+    theme(legend.position = "none") +
+    scale_x_discrete(labels = c("1", "2", "3", "4", "5", "6", "7", "8", "9"))
+```
+
+
+
+# Colony Duration 
+
+```{r}
+descdist(drone.ce$duration, discrete = TRUE)
+hist(drone.ce$duration)
+
+dur1 <- glm(duration ~ treatment + whole.mean + alive + replicate + drones, data = drone.ce)
+summary(dur1)
+dur3 <- glm(duration ~ treatment*whole.mean + alive + replicate, data = drone.ce)
+drop1(dur1, test = "Chisq")
+dur2 <- update(dur1, .~. -whole.mean)
+anova(dur1, dur2, test = "Chisq")
+AIC(dur1, dur2)
+Anova(dur1) 
+anova(dur1, dur3, test = "Chisq")
+
+dur.glmnb <- glm.nb(duration ~ treatment + replicate + alive, data =drone.ce)
+Anova(dur.glmnb)
+
+plot(dur1)
+plot(dur2)
+
+durm <- emmeans(dur.glmnb, pairwise ~ treatment, type = "response")
+durm
+
+dur.glmnb
+
+durmedt <- setDT(as.data.frame(durm$emmeans))
+durmcdt <- setDT(as.data.frame(durm$contrasts))
+durmedt
+durmcdt
+Adur <- setDT(as.data.frame(Anova(dur.glmnb)))
+Adur
+
+cldur <- cld(object = durm,
+                     adjust = "Tukey",
+                     Letters = letters,
+                     alpha = 0.05)
+
+cldur
+durmdf <- as.data.frame(durm$emmeans)
+
+durmdf$plot <- durmdf$response + durmdf$SE
+
+ggplot(durmdf, aes(x = treatment, y = response, fill = treatment)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_errorbar(aes(ymin = response - SE, ymax = response + SE), width = 0.2, position = position_dodge(0.9)) +
+  labs(x = "Treatment", y = "Days", title = "Average Colony Duration") +
+  scale_fill_viridis_d() +
+  coord_cartesian(ylim=c(35,50))+
+  theme(legend.position = "none") +
+   annotate(geom = "text", 
+          x = 3, y = 50,
+          label = "P = 0.03",
+          size = 8) +
+  annotate(geom = "text",
+           x = c(1, 2, 3, 4, 5),
+           y = c(durmdf$plot+1),
+           label = c("b", "ab", "ab", "a", "ab"),
+           size = 6) +
+  theme(legend.position =  "none")
+
+```
+
+
+# Figures
+
+```{r}
+
+broodfig <- brood %>%
+  select(treatment, brood_cells, eggs, drones, honey_pot, larvae, pupae, dead_larvae, dead_pupae, alive)
+
+brood_long <- broodfig %>%
+  pivot_longer(cols = c(brood_cells, eggs, drones, honey_pot, larvae, pupae, dead_larvae, dead_pupae, alive),
+               names_to = "dependent_variable",
+               values_to = "count")
+
+ggplot(brood_long, aes(x = as.factor(treatment), y = count, fill = dependent_variable)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(x = "Treatment", y = "Count", fill = "Brood Stage") +
+  scale_fill_manual(values = c("brood_cells" = "blue", 
+                                "honey_pot" = "green", 
+                                "eggs" = "orange", 
+                                "dead_larvae" = "red",
+                                "dead_pupae" = "pink",
+                                "drones" = "magenta",
+                                "alive" = "black",
+                                "larvae" = "gold",
+                                "pupae" = "sienna")) +
+  theme_cowplot()
+```
+
+```{r}
+sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(meane = mean(eggs),
+            meanhp = mean(honey_pot),
+            meanl = mean(larvae),
+            meanp = mean(pupae))
+
+sum
+
+
+# Create a data frame with the provided data
+data <- data.frame(
+  treatment = factor(c(1, 2, 3, 4, 5)),
+  meane = c(14.777778, 9.111111, 5.555556, 6.555556, 4.333333),
+  meanhp = c(4.222222, 7.888889, 5.555556, 7.000000, 6.222222),
+  meanl = c(28.44444, 17.00000, 37.00000, 24.22222, 18.00000),
+  meanp = c(8.555556, 16.666667, 18.777778, 12.555556, 8.333333)
+)
+
+# Melt the data into long format
+library(reshape2)
+data_melted <- melt(data, id.vars = "treatment")
+
+# Create the bar graph
+ggplot(data_melted, aes(x = treatment, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(x = "Treatment", y = "Mean", fill = "Variable") +
+  scale_fill_manual(values = c("meane" = "blue", 
+                                "meanhp" = "green", 
+                                "meanl" = "orange", 
+                                "meanp" = "red")) +
+  theme_minimal()
+
+
+# Create a data frame with the provided data and standard errors
+data <- data.frame(
+  treatment = factor(c(1, 2, 3, 4, 5)),
+  meane = c(14.777778, 9.111111, 5.555556, 6.555556, 4.333333),
+  meanhp = c(4.222222, 7.888889, 5.555556, 7.000000, 6.222222),
+  meanl = c(28.44444, 17.00000, 37.00000, 24.22222, 18.00000),
+  meanp = c(8.555556, 16.666667, 18.777778, 12.555556, 8.333333),
+  se_meane = c(0.1, 0.2, 0.15, 0.2, 0.1), # Replace with your actual standard errors
+  se_meanhp = c(0.1, 0.15, 0.12, 0.18, 0.1), # Replace with your actual standard errors
+  se_meanl = c(0.2, 0.25, 0.18, 0.3, 0.15), # Replace with your actual standard errors
+  se_meanp = c(0.12, 0.18, 0.2, 0.15, 0.1) # Replace with your actual standard errors
+)
+
+# Melt the data into long format
+data_long <- data %>%
+  pivot_longer(cols = starts_with("meane"), 
+               names_to = "variable",
+               values_to = "mean") %>%
+  pivot_longer(cols = starts_with("se_"), 
+               names_to = "variable_se",
+               values_to = "se") %>%
+  mutate(variable_se = gsub("se_", "", variable_se)) %>%
+  select(treatment, variable, mean, variable_se, se)
+
+
+# Create the bar graph with standard error bars
+ggplot(data_long, aes(x = treatment, y = mean, fill = variable_se)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  labs(x = "Treatment", y = "Mean", fill = "Variable") +
+  scale_fill_manual(values = c("meane" = "blue", 
+                                "meanhp" = "green", 
+                                "meanl" = "orange", 
+                                "meanp" = "red")) +
+  theme_minimal()
+
+```
+
+```{r}
+sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(meane = mean(eggs),
+            meanhp = mean(honey_pot),
+            meanl = mean(larvae),
+            meanp = mean(pupae),
+            sd_e= sd(eggs),
+            sd_hp = sd(honey_pot),
+            sd_l = sd(larvae),
+            sd_p = sd(pupae),
+            n_e = length(eggs),
+            n_hp = length(honey_pot),
+            n_l = length(larvae),
+            n_p = length(pupae)) %>%
+  mutate(se_e = sd_e / sqrt(n_e),
+         se_hp = sd_hp / sqrt(n_hp),
+         se_l = sd_l / sqrt(n_l),
+         se_p = sd_p / sqrt(n_p))
+
+# Now 'sum' contains the means, standard deviations, and standard errors for each variable
+```
+
+```{r}
+
+sum_data <- read_csv("sum_data.csv", col_types = cols(treatment = col_factor(levels = c("1", 
+    "2", "3", "4", "5"))))
+
+unique(sum_data$treatment)
+
+ggplot(sum_data, aes(x = treatment, y = mean, fill = variable)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  labs(x = "Treatment", y = "Count", fill = "Variable") +
+  scale_fill_viridis_d(labels = c("Average Eggs", "Average Honey Pots", "Average Larvae", "Average Pupae")) +
+  theme_cowplot()
+
+
+
+```
+
+```{r}
+sum <- brood %>%
+  group_by(treatment) %>%
+  summarise(meane = mean(eggs),
+            meanhp = mean(honey_pot),
+            meanl = mean(larvae),
+            meanp = mean(pupae),
+            meana = mean(alive),
+            meandp = mean(dead_pupae),
+            meandl = mean(dead_larvae),
+            sd_e= sd(eggs),
+            sd_hp = sd(honey_pot),
+            sd_l = sd(larvae),
+            sd_p = sd(pupae),
+            sd_a = sd(alive),
+            sd_dp = sd(dead_pupae),
+            sd_dl = sd(dead_larvae),
+            n_e = length(eggs),
+            n_hp = length(honey_pot),
+            n_l = length(larvae),
+            n_p = length(pupae),
+            n_a = length(alive),
+            n_dp = length(dead_pupae),
+            n_dl = length(dead_larvae)) %>%
+  mutate(se_e = sd_e / sqrt(n_e),
+         se_hp = sd_hp / sqrt(n_hp),
+         se_l = sd_l / sqrt(n_l),
+         se_p = sd_p / sqrt(n_p),
+         se_a = sd_a / sqrt(n_a),
+         se_dp = sd_dp / sqrt(n_dp),
+         se_dl = sd_dl / sqrt(n_dl))
+
+sum
+
+```
+
+```{r, fig.width= 12, fig.height= 12}
+ e <- ggplot(sum, aes(x = treatment, y = meane, fill = treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = meane - se_e, ymax = meane + se_e),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  scale_fill_viridis_d() + 
+  theme_cowplot() +
+  theme(legend.position =  "none") +
+  labs(y = "average eggs", x = "")
+  
+ hp <- ggplot(sum, aes(x = treatment, y = meanhp, fill = treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = meanhp - se_hp, ymax = meanhp + se_hp),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  scale_fill_viridis_d() + 
+  theme_cowplot() +
+  theme(legend.position =  "none") +
+  labs(y = "average honey pots", x = "")
+ 
+ l <- ggplot(sum, aes(x = treatment, y = meanl, fill = treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = meanl - se_l, ymax = meanl + se_l),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  scale_fill_viridis_d() + 
+  theme_cowplot() +
+  theme(legend.position =  "none") +
+  labs(y = "average larvae", x = "treatment")
+ 
+ p <- ggplot(sum, aes(x = treatment, y = meanp, fill = treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = meanhp - se_p, ymax = meanp + se_p),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  scale_fill_viridis_d() + 
+  theme_cowplot() +
+  theme(legend.position =  "none") +
+  labs(y = "average pupae", x = "treatment")
+ 
+  a <- ggplot(sum, aes(x = treatment, y = meana, fill = treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = meana - se_a, ymax = meana + se_a),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  scale_fill_viridis_d() + 
+  theme_cowplot() +
+  theme(legend.position =  "none") +
+  labs(y = "average surviving workers", x = "treatment")
+  
+  dl <- ggplot(sum, aes(x = treatment, y = meandl, fill = treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = meandl - se_dl, ymax = meandl + se_dl),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  scale_fill_viridis_d() + 
+  theme_cowplot() +
+  theme(legend.position =  "none") +
+  labs(y = "average dead larvae", x = "treatment")
+ 
+  dp <- ggplot(sum, aes(x = treatment, y = meandp, fill = treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = meandp - se_dp, ymax = meandp + se_dp),
+                position = position_dodge(width = 0.9), width = 0.2) +
+  scale_fill_viridis_d() + 
+  theme_cowplot() +
+  theme(legend.position =  "none") +
+  labs(y = "average dead pupae", x = "treatment")
+  
+  plot_grid(e, hp, l, p, dl, dp, ncol=2, nrow =3)
+```
+
+```{r}
+sum_dt = setDT(as.data.frame(sum))
+sum_dt
+```
+
+```{r, fig.width= 22, fig.height= 14}
+plot_grid(em_color, count_pup_col, dry_color, fat_col,  ncol=2, nrow =2)
+
+plot_grid(em_bw, count_pup_bw, dry_bw, fat_bw, ncol=2, nrow =2)
+
+```
+
+```{r, fig.width= 20, fig.height= 8}
+plot_grid(work_surv_col, prob_brood_col, ncol=2, nrow =1)
+plot_grid(work_surv_bw, prob_brood_bw, ncol=2, nrow =1)
+
+```
+
+```{r}
+
+plot(workers$replicate, workers$start_wet_weight)
+
+
+plot(workers$replicate, workers$`dry weight`)
+
+```
