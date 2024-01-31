@@ -1,5 +1,5 @@
 ---
-title: "Widely-used fungicide Pristine® causes sub-lethal effects in common eastern bumble bee (*Bombus impatiens*) microcolonies "
+title: "Consumption of pollen contaminated with field-realistic concentrations of fungicide cause sub-lethal effects in common eastern bumble bee (Bombus impatiens [Hymenoptera]: [Apidae]) microcolonies"
 author: "Emily Runnion"
 date: "Data Collected 2022, Data Analyzed 2023"
 output:
